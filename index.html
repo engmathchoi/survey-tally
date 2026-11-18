@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'none'; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<meta name="referrer" content="no-referrer">
+<title>설문 집계기</title>
+</head>
+<body>
+<!-- 계산 로직: 화면(DOM)과 무관한 순수 함수만 둔다. test/tally.test.js가 이 블록만 꺼내 시험한다. -->
+<script id="tally-core">
+(function (root) {
+  'use strict';
+
+  function isDelimiter(ch) {
+    return ch === '\t' || ch === '\n' || ch === '\r';
+  }
+
+  // 엑셀이 따옴표로 감싼 칸을 읽는다. 닫는 따옴표 뒤가 칸·줄 구분자나 끝이 아니면 null.
+  function readQuoted(s, start) {
+    let out = '';
+    let j = start + 1;
+    while (j < s.length) {
+      if (s[j] === '"') {
+        if (s[j + 1] === '"') { out += '"'; j += 2; continue; }
+        const after = j + 1;
+        if (after >= s.length || isDelimiter(s[after])) return { value: out, next: after };
+        return null;
+      }
+      out += s[j];
+      j += 1;
+    }
+    return null;
+  }
+
+  // 탭 구분 텍스트 → 줄 배열(각 줄은 칸 문자열 배열). 끝의 빈 줄은 버린다.
+  function parseTsv(text) {
+    const s = text == null ? '' : String(text);
+    const rows = [];
+    let row = [];
+    let i = 0;
+    for (;;) {
+      let value;
+      const quoted = s[i] === '"' ? readQuoted(s, i) : null;
+      if (quoted) {
+        value = quoted.value;
+        i = quoted.next;
+      } else {
+        let j = i;
+        while (j < s.length && !isDelimiter(s[j])) j += 1;
+        value = s.slice(i, j);
+        i = j;
+      }
+      row.push(value);
+      if (i >= s.length) { rows.push(row); break; }
+      if (s[i] === '\t') { i += 1; continue; }
+      i += (s[i] === '\r' && s[i + 1] === '\n') ? 2 : 1;
+      rows.push(row);
+      row = [];
+      if (i >= s.length) break;
+    }
+    while (rows.length > 0) {
+      const last = rows[rows.length - 1];
+      if (last.length === 1 && last[0] === '') rows.pop();
+      else break;
+    }
+    return rows;
+  }
+
+  // 칸 판정: 'valid'(1~5), 'blank'(없음·빈칸·공백만), 'excluded'(그 밖).
+  function classifyCell(raw) {
+    if (raw == null) return 'blank';
+    const v = String(raw).trim();
+    if (v === '') return 'blank';
+    if (v.length === 1 && v >= '1' && v <= '5') return 'valid';
+    return 'excluded';
+  }
+
+  // 합 ÷ 수를 소수 셋째 자리에서 반올림해 둘째 자리까지. 정수 연산만 쓴다.
+  function formatAverage(sum, count) {
+    if (!count) return '-';
+    const q = Math.floor((sum * 200 + count) / (2 * count));
+    const whole = Math.floor(q / 100);
+    const frac = q % 100;
+    return whole + '.' + (frac < 10 ? '0' : '') + frac;
+  }
+
+  // 붙여넣은 텍스트 전체를 집계한다.
+  function tally(text) {
+    const rows = parseTsv(text);
+    if (rows.length === 0) return { error: 'empty', questions: [], responseCount: 0 };
+    const header = rows[0];
+    if (header.length < 2) return { error: 'no-questions', questions: [], responseCount: rows.length - 1 };
+
+    const questions = [];
+    for (let c = 1; c < header.length; c += 1) {
+      const name = header[c].trim();
+      questions.push({ name: name === '' ? '(' + (c + 1) + '열)' : name, valid: 0, sum: 0, blank: 0, excluded: 0, average: '-' });
+    }
+    for (let r = 1; r < rows.length; r += 1) {
+      const row = rows[r];
+      for (let c = 1; c < header.length; c += 1) {
+        const q = questions[c - 1];
+        const cell = row[c];
+        const kind = classifyCell(cell);
+        if (kind === 'valid') { q.valid += 1; q.sum += Number(cell.trim()); }
+        else if (kind === 'blank') q.blank += 1;
+        else q.excluded += 1;
+      }
+    }
+    for (const q of questions) q.average = formatAverage(q.sum, q.valid);
+    return { error: null, questions: questions, responseCount: rows.length - 1 };
+  }
+
+  root.SurveyTally = { parseTsv: parseTsv, classifyCell: classifyCell, formatAverage: formatAverage, tally: tally };
+})(globalThis);
+</script>
+</body>
+</html>

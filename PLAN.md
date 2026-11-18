@@ -49,7 +49,7 @@
   실행하고 `node:test`로 시험한다. 외부 패키지 없음.
 - `test/page.test.js`: 페이지에 외부 자원(`src`/`href`가 http(s)·`//`로 시작)이나
   저장소·네트워크 API(`fetch`, `XMLHttpRequest`, `localStorage` 등)가 없는지 정적으로 확인.
-- `package.json`: `npm test` → `node --test test/`
+- `package.json`: `npm test` → `node --test "test/*.test.js"`
 
 ## 작업 순서(작업마다 커밋)
 
